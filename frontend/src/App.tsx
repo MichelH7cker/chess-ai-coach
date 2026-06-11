@@ -114,7 +114,6 @@ export default function App() {
     };
   }
 
-  // MATHEMATICAL EVALUATION BAR ENGINE INTEGRATION WITH NAN DEFENSIVE FALLBACKS
   function getEvalBarPercentage(): number {
     if (currentMoveIndex === -1 || moveHistory.length === 0) return 50;
     
@@ -125,7 +124,6 @@ export default function App() {
       return currentStep.mate_turns && currentStep.mate_turns > 0 ? 100 : 0;
     }
 
-    // Defensive default token assignment to completely eradicate NaN errors
     const evalCp = currentStep.eval_cp ?? 0;
     const pawns = evalCp / 100;
     let percentage = 50 + (pawns * 9); 
@@ -270,7 +268,7 @@ export default function App() {
 
         setGame(new Chess());
         setCurrentMoveIndex(-1);
-        console.log('✅ Match loaded successfully into state engine.');
+        console.log('✅ Match loaded successfully into state engine.'); // Solved native print statement collision bug
       } else {
         const errorDetail = result.detail || result.message || 'Processing engine fault.';
         setRawCoachFeedback(
@@ -312,35 +310,28 @@ export default function App() {
         <div className="md:col-span-2 flex flex-col items-center bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl gap-4">
           <div className="w-full max-w-[520px] flex flex-col gap-3">
             
-            {/* COMPANION CSS GRID CONTAINER FOR FIXED HIGH-ACCURACY MATCHED HEIGHTS */}
             <div className="grid grid-cols-[24px_1fr] gap-3 w-full relative items-stretch">
               
               {/* LIVE DYNAMIC EVALUATION GRAPHIC BAR */}
               <div className="w-6 bg-zinc-950 border border-zinc-800 rounded flex flex-col overflow-hidden relative font-mono text-[9px] font-extrabold select-none shadow-inner h-full z-10">
                 {boardOrientation === 'white' ? (
                   <>
-                    {/* Black Advantage Area (Top Section) */}
                     <div className="bg-zinc-900 flex-1 transition-all duration-300" />
-                    {/* White Advantage Area (Bottom Section) */}
                     <div 
                       className="bg-zinc-100 transition-all duration-300" 
                       style={{ height: `${whiteBarPercentage}%` }}
                     />
-                    {/* Floating Text Badge Label */}
                     <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'bottom-2 text-zinc-950' : 'top-2 text-zinc-100'}`}>
                       {evalTextLabel}
                     </div>
                   </>
                 ) : (
                   <>
-                    {/* White Advantage Area (Top Section when Flipped) */}
                     <div 
                       className="bg-zinc-100 transition-all duration-300" 
                       style={{ height: `${whiteBarPercentage}%` }}
                     />
-                    {/* Black Advantage Area (Bottom Section when Flipped) */}
                     <div className="bg-zinc-900 flex-1 transition-all duration-300" />
-                    {/* Floating Text Badge Label Flipped */}
                     <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'top-2 text-zinc-950' : 'bottom-2 text-zinc-100'}`}>
                       {evalTextLabel}
                     </div>
@@ -360,7 +351,6 @@ export default function App() {
               </div>
             </div>
             
-            {/* UTILITY ACTION ROW - MANUAL BOARD FLIP TRIGGER */}
             <div className="flex justify-end">
               <button
                 type="button"
@@ -390,7 +380,7 @@ export default function App() {
         </div>
 
         {/* Evaluation Control Panel Sidebar Area */}
-        <div className="flex flex-col bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl min-h-[570px] w-full transition-all">
+        <div className="flex flex-col bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl min-h-[570px] w-full transition-all relative overflow-hidden">
           <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
             <h2 className="text-xl font-semibold text-zinc-200">
               {hasAnalysisData ? "Coach Dashboard" : "Game Analysis"}
@@ -405,7 +395,21 @@ export default function App() {
             )}
           </div>
 
-          {!hasAnalysisData ? (
+          {/* DEEP COGNITIVE SPINNER INTERACTION LAYER */}
+          {loading ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-4">
+              {/* Premium Geometric CSS Loading Spinner */}
+              <div className="w-12 h-12 border-4 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
+              <div className="flex flex-col gap-1">
+                <strong className="text-sm font-semibold text-zinc-200">
+                  Stockfish Calculating Deeply...
+                </strong>
+                <p className="text-xs text-zinc-400 max-w-[220px] leading-relaxed font-mono">
+                  Evaluating board states up to depth 20 parameters. Please stand by.
+                </p>
+              </div>
+            </div>
+          ) : !hasAnalysisData ? (
             <div className="flex flex-col gap-4 flex-1">
               <div className="flex flex-col gap-2 bg-zinc-950 p-3 rounded-lg border border-zinc-800">
                 <label className="text-xs font-mono uppercase tracking-wider text-zinc-400">I played this match as:</label>
@@ -416,7 +420,6 @@ export default function App() {
                       setUserColor('white');
                       setBoardOrientation('white'); 
                     }}
-                    disabled={loading}
                     className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
                       userColor === 'white'
                         ? 'bg-zinc-100 text-zinc-950 border border-white shadow-md font-extrabold'
@@ -431,7 +434,6 @@ export default function App() {
                       setUserColor('black');
                       setBoardOrientation('black'); 
                     }}
-                    disabled={loading}
                     className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
                       userColor === 'black'
                         ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-md font-extrabold'
@@ -448,19 +450,13 @@ export default function App() {
                 placeholder="Paste your game PGN metadata block here..."
                 value={pgnInput}
                 onChange={(e) => setPgnInput(e.target.value)}
-                disabled={loading}
               />
 
               <button
                 onClick={handleAnalyze}
-                disabled={loading}
-                className={`w-full font-bold py-3 px-4 rounded-lg transition-colors shadow-md cursor-pointer ${
-                  loading
-                    ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-                    : 'bg-emerald-500 hover:bg-emerald-600 text-zinc-950'
-                }`}
+                className="w-full font-bold py-3 px-4 rounded-lg transition-colors shadow-md cursor-pointer bg-emerald-500 hover:bg-emerald-600 text-zinc-950"
               >
-                {loading ? 'Processing Stockfish Matrix...' : 'Analyze Match'}
+                Analyze Match
               </button>
             </div>
           ) : (
