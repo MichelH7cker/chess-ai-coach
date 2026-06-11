@@ -6,6 +6,9 @@ interface ChessStep {
   move_played_san: string;
   move_played_uci: string;
   tag_key: string;
+  eval_cp: number;
+  is_mate: boolean;
+  mate_turns: number | null;
 }
 
 export default function App() {
@@ -13,19 +16,19 @@ export default function App() {
   const [pgnInput, setPgnInput] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // State variable tracking user side perspective selection
-  const [userColor, setUserColor] = useState<string>('white'); // "white" or "black"
+  const [userColor, setUserColor] = useState<string>('white'); 
+  const [boardOrientation, setBoardOrientation] = useState<'white' | 'black'>('white');
   
   const [rawCoachFeedback, setRawCoachFeedback] = useState('');
   const [moveHistory, setMoveHistory] = useState<ChessStep[]>([]);
   const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(-1); 
   const [forcingOverviewView, setForcingOverviewView] = useState<boolean>(false);
 
-  // Native regex text analyzer to interpret Markdown markup safely
   function parseBoldText(text: string) {
-    const parts = text.split(/\*\*(.*?)\*\*/g);
-    return parts.map((part, i) => 
-      i % 2 === 1 ? <strong key={i} className="text-emerald-300 font-semibold">{part}</strong> : part
+    const boldRegex = /\*\*(.*?)\*\*/g;
+    const tokens = text.split(boldRegex);
+    return tokens.map((token, i) => 
+      i % 2 === 1 ? <strong key={i} className="text-emerald-300 font-semibold">{token}</strong> : token
     );
   }
 
@@ -85,7 +88,7 @@ export default function App() {
     const currentStep = moveHistory[currentMoveIndex];
     if (currentStep) {
       const stepText = extractTagContent(rawCoachFeedback, currentStep.tag_key);
-      return stepText || `### Move ${Math.floor((currentMoveIndex + 2) / 2)} Analysis\n*No explicit errors detected by Stockfish for this position matrix.*`;
+      return stepText || `### Move ${currentMoveIndex + 1} Analysis\n*No explicit errors detected by Stockfish for this position matrix.*`;
     }
 
     return '';
@@ -109,6 +112,42 @@ export default function App() {
         backgroundColor: 'rgba(52, 211, 153, 0.35)', 
       },
     };
+  }
+
+  // MATHEMATICAL EVALUATION BAR ENGINE INTEGRATION WITH NAN DEFENSIVE FALLBACKS
+  function getEvalBarPercentage(): number {
+    if (currentMoveIndex === -1 || moveHistory.length === 0) return 50;
+    
+    const currentStep = moveHistory[currentMoveIndex];
+    if (!currentStep) return 50;
+
+    if (currentStep.is_mate) {
+      return currentStep.mate_turns && currentStep.mate_turns > 0 ? 100 : 0;
+    }
+
+    // Defensive default token assignment to completely eradicate NaN errors
+    const evalCp = currentStep.eval_cp ?? 0;
+    const pawns = evalCp / 100;
+    let percentage = 50 + (pawns * 9); 
+    
+    if (percentage > 95) percentage = 95;
+    if (percentage < 5) percentage = 5;
+    return percentage;
+  }
+
+  function getEvalLabel(): string {
+    if (currentMoveIndex === -1 || moveHistory.length === 0) return '0.0';
+    
+    const currentStep = moveHistory[currentMoveIndex];
+    if (!currentStep) return '0.0';
+
+    if (currentStep.is_mate) {
+      return currentStep.mate_turns ? `M${Math.abs(currentStep.mate_turns)}` : 'M';
+    }
+
+    const evalCp = currentStep.eval_cp ?? 0;
+    const pawns = evalCp / 100;
+    return pawns >= 0 ? `+${pawns.toFixed(1)}` : `${pawns.toFixed(1)}`;
   }
 
   function pgnReplayToPosition(history: ChessStep[], targetIndex: number) {
@@ -158,12 +197,18 @@ export default function App() {
     pgnReplayToPosition(moveHistory, moveHistory.length - 1);
   }
 
+  function handleToggleOrientation() {
+    setBoardOrientation(prev => prev === 'white' ? 'black' : 'white');
+  }
+
   function handleResetAnalysis() {
     setGame(new Chess());
     setPgnInput('');
     setRawCoachFeedback('');
     setMoveHistory([]);
     setCurrentMoveIndex(-1);
+    setBoardOrientation('white');
+    setUserColor('white');
     setForcingOverviewView(false);
   }
 
@@ -245,6 +290,11 @@ export default function App() {
   const activeFeedbackContent = getActiveFeedbackBlock();
   const hasAnalysisData = moveHistory.length > 0;
   const currentHighlightStyles = getCustomSquareStyles();
+  
+  const whiteBarPercentage = getEvalBarPercentage();
+  const evalTextLabel = getEvalLabel();
+  const activeStepObj = currentMoveIndex >= 0 ? moveHistory[currentMoveIndex] : null;
+  const isWhiteWinning = activeStepObj ? (activeStepObj.eval_cp >= 0 || (activeStepObj.mate_turns !== null && activeStepObj.mate_turns > 0)) : true;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 text-zinc-100 font-sans">
@@ -253,20 +303,73 @@ export default function App() {
           Chess AI Coach
         </h1>
         <p className="text-sm text-gray-400">
-          High-accuracy Stockfish evaluations paired with contextual, sarcastic coaching reviews
+          High-accuracy Stockfish evaluations paired with contextual, professional coaching reviews
         </p>
       </header>
 
       <main className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
         {/* Board Container Column Layout wrapper */}
         <div className="md:col-span-2 flex flex-col items-center bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl gap-4">
-          <div className="w-full max-w-[480px]">
-            <Chessboard
-              position={game.fen()}
-              onPieceDrop={onDrop}
-              arePiecesDraggable={!hasAnalysisData}
-              customSquareStyles={currentHighlightStyles}
-            />
+          <div className="w-full max-w-[520px] flex flex-col gap-3">
+            
+            {/* COMPANION CSS GRID CONTAINER FOR FIXED HIGH-ACCURACY MATCHED HEIGHTS */}
+            <div className="grid grid-cols-[24px_1fr] gap-3 w-full relative items-stretch">
+              
+              {/* LIVE DYNAMIC EVALUATION GRAPHIC BAR */}
+              <div className="w-6 bg-zinc-950 border border-zinc-800 rounded flex flex-col overflow-hidden relative font-mono text-[9px] font-extrabold select-none shadow-inner h-full z-10">
+                {boardOrientation === 'white' ? (
+                  <>
+                    {/* Black Advantage Area (Top Section) */}
+                    <div className="bg-zinc-900 flex-1 transition-all duration-300" />
+                    {/* White Advantage Area (Bottom Section) */}
+                    <div 
+                      className="bg-zinc-100 transition-all duration-300" 
+                      style={{ height: `${whiteBarPercentage}%` }}
+                    />
+                    {/* Floating Text Badge Label */}
+                    <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'bottom-2 text-zinc-950' : 'top-2 text-zinc-100'}`}>
+                      {evalTextLabel}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* White Advantage Area (Top Section when Flipped) */}
+                    <div 
+                      className="bg-zinc-100 transition-all duration-300" 
+                      style={{ height: `${whiteBarPercentage}%` }}
+                    />
+                    {/* Black Advantage Area (Bottom Section when Flipped) */}
+                    <div className="bg-zinc-900 flex-1 transition-all duration-300" />
+                    {/* Floating Text Badge Label Flipped */}
+                    <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'top-2 text-zinc-950' : 'bottom-2 text-zinc-100'}`}>
+                      {evalTextLabel}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Chessboard Box Frame Wrapper Layout */}
+              <div className="w-full aspect-square">
+                <Chessboard
+                  position={game.fen()}
+                  onPieceDrop={onDrop}
+                  arePiecesDraggable={!hasAnalysisData}
+                  customSquareStyles={currentHighlightStyles}
+                  boardOrientation={boardOrientation}
+                />
+              </div>
+            </div>
+            
+            {/* UTILITY ACTION ROW - MANUAL BOARD FLIP TRIGGER */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleToggleOrientation}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+              >
+                🔄 Flip Board
+              </button>
+            </div>
           </div>
 
           {/* Interactive Navigation Control Bar */}
@@ -303,16 +406,16 @@ export default function App() {
           </div>
 
           {!hasAnalysisData ? (
-            // State A: Show input controls before analysis execution loop
             <div className="flex flex-col gap-4 flex-1">
-              
-              {/* CLEAN PERSPECTIVE COLOR SELECTOR BUTTON GROUP */}
               <div className="flex flex-col gap-2 bg-zinc-950 p-3 rounded-lg border border-zinc-800">
                 <label className="text-xs font-mono uppercase tracking-wider text-zinc-400">I played this match as:</label>
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setUserColor('white')}
+                    onClick={() => {
+                      setUserColor('white');
+                      setBoardOrientation('white'); 
+                    }}
                     disabled={loading}
                     className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
                       userColor === 'white'
@@ -324,7 +427,10 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setUserColor('black')}
+                    onClick={() => {
+                      setUserColor('black');
+                      setBoardOrientation('black'); 
+                    }}
                     disabled={loading}
                     className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
                       userColor === 'black'
@@ -358,7 +464,6 @@ export default function App() {
               </button>
             </div>
           ) : (
-            // State B: Expanded Dynamic Commentary Panel Display
             <div className="flex flex-col flex-1 gap-3 h-full">
               <div className="flex gap-2">
                 <button

@@ -38,7 +38,6 @@ async def analyze_game(request: PGNRequest):
 
     engine = None
     try:
-        # 1. MATHEMATICAL PGN PROCESSING & STOCKFISH ENGINE INITIALIZATION
         pgn_io = io.StringIO(request.pgn_text)
         game = chess.pgn.read_game(pgn_io)
         
@@ -53,7 +52,6 @@ async def analyze_game(request: PGNRequest):
         
         previous_eval_score = 35 
 
-        # Using absolute move_index (1, 2, 3, 4...) for stable tag alignment
         for move_index, move in enumerate(game.mainline_moves(), start=1):
             turn_number = (move_index + 1) // 2
             player_color = "White" if board.turn == chess.WHITE else "Black"
@@ -74,7 +72,7 @@ async def analyze_game(request: PGNRequest):
             board.push(move)
             
             # Stockfish real-time analysis engine iteration loop
-            analysis_info = engine.analyse(board, chess.engine.Limit(time=0.05))
+            analysis_info = engine.analyse(board, chess.engine.Limit(depth=20))
             for_white_score = analysis_info["score"].white()
             
             raw_score = for_white_score.score()
@@ -99,7 +97,6 @@ async def analyze_game(request: PGNRequest):
             is_check = board.is_check() and not is_checkmate
             status_flags = " [CHECKMATE - GAME OVER]" if is_checkmate else (" [CHECK]" if is_check else "")
             
-            # Absolute sequential tag marker instantiation
             step_tag = f"MOVE_{move_index}"
             
             telemetry_line = (
@@ -110,10 +107,17 @@ async def analyze_game(request: PGNRequest):
             )
             move_telemetry_logs.append(telemetry_line)
 
+            # Pack raw evaluation numbers safely for frontend UI rendering
+            eval_cp_value = current_eval_score if not for_white_score.is_mate() else 0
+            mate_turns_value = for_white_score.mate() if for_white_score.is_mate() else None
+
             chess_steps.append({
                 "move_played_san": san,
                 "move_played_uci": uci,
-                "tag_key": step_tag
+                "tag_key": step_tag,
+                "eval_cp": eval_cp_value,
+                "is_mate": for_white_score.is_mate(),
+                "mate_turns": mate_turns_value
             })
 
         game_ended_in_mate = board.is_checkmate()
@@ -129,7 +133,6 @@ async def analyze_game(request: PGNRequest):
 
         telemetry_payload_string = "\n".join(move_telemetry_logs)
         
-        # Reinforced instruction prompt template with absolute structural boundaries
         prompt = (
             f"You are a professional chess grandmaster and an encouraging, highly educational chess coach analyzing a user's match.\n\n"
             f"USER PERSPECTIVE CONTEXT:\n"
