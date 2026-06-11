@@ -1,9 +1,11 @@
 import io
 import os
+import time
 import chess.pgn
 import chess.engine
 from google import genai
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -17,7 +19,14 @@ except Exception as e:
 
 app = FastAPI(title="Chess AI Coach API")
 
-# Path to the Stockfish binary on Linux
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 STOCKFISH_PATH = "/usr/bin/stockfish"
 
 class GameInput(BaseModel):
@@ -94,7 +103,7 @@ async def analyze_game(game_input: GameInput):
 
             previous_score = current_eval_number
 
-        # 1. First attempt to quit the engine safely after normal analysis
+        # First attempt to quit the engine safely after normal analysis
         engine.quit()
 
         critical_mistakes = [
@@ -122,12 +131,27 @@ async def analyze_game(game_input: GameInput):
             {critical_mistakes}
             """
             
-            # 2. FIX: Updated the model to the latest standard
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt
-            )
-            coach_feedback = response.text
+            # Resiliency Mechanism: Retry loop with Fallback for cloud stability
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=prompt
+                    )
+                    coach_feedback = response.text
+                    break  # Success! Exit the retry loop
+                except Exception as api_error:
+                    error_msg = str(api_error)
+                    # If it's a rate limit or service overload, wait and retry
+                    if ("503" in error_msg or "429" in error_msg) and attempt < max_retries - 1:
+                        print(f"Google API overloaded. Retrying in 2 seconds... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(2)
+                    else:
+                        # Graceful Fallback: Return the app data with an explanation instead of crashing
+                        coach_feedback = "The AI Coach is currently meditating due to high demand. The mathematical analysis below is fully intact, but please try again later for the textual breakdown."
+                        print(f"AI Generation Failed after {attempt + 1} attempts: {api_error}")
+                        break
 
         return {
             "status": "success", 
@@ -137,10 +161,9 @@ async def analyze_game(game_input: GameInput):
 
     except Exception as e:
         print(f"Backend Error: {e}")
-        # 3. FIX: Idempotent engine shutdown to prevent Cascading Failures
         if 'engine' in locals():
             try:
                 engine.quit()
             except Exception:
-                pass # Silently ignore if already closed
+                pass
         raise HTTPException(status_code=500, detail=str(e))
