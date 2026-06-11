@@ -15,7 +15,7 @@ export default function App() {
   
   const [rawCoachFeedback, setRawCoachFeedback] = useState('');
   const [moveHistory, setMoveHistory] = useState<ChessStep[]>([]);
-  const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(-1); // -1 is starting position
+  const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(-1); 
   const [forcingOverviewView, setForcingOverviewView] = useState<boolean>(false);
 
   // Native regex text analyzer to interpret Markdown markup safely
@@ -71,11 +71,9 @@ export default function App() {
     return match ? match[1].trim() : '';
   }
 
-  // Dynamic selector picking the textual focus content based on moveHistory navigation state
   function getActiveFeedbackBlock(): string {
     if (!rawCoachFeedback) return '';
     
-    // If the user forces overview click or is positioned at the start array checkpoint
     if (currentMoveIndex === -1 || forcingOverviewView) {
       const overviewText = extractTagContent(rawCoachFeedback, 'OVERVIEW');
       return overviewText || "### Match Loaded\nUse the navigation controls below the chessboard to step through individual move reviews.";
@@ -90,9 +88,30 @@ export default function App() {
     return '';
   }
 
-  // Replays the game from the absolute beginning up to a specific move index
+  // DYNAMIC SQUARE STYLING CALCULATOR
+  // Computes overlay highlight markers using raw UCI positional coordinates
+  function getCustomSquareStyles() {
+    if (currentMoveIndex === -1 || moveHistory.length === 0) return {};
+
+    const currentStep = moveHistory[currentMoveIndex];
+    if (!currentStep || !currentStep.move_played_uci) return {};
+
+    const uci = currentStep.move_played_uci;
+    const fromSquare = uci.slice(0, 2);
+    const toSquare = uci.slice(2, 4);
+
+    // Returns soft, semi-transparent highlight overlays mirroring premium chess clients
+    return {
+      [fromSquare]: {
+        backgroundColor: 'rgba(251, 191, 36, 0.25)', // Smooth ambient amber for origin square
+      },
+      [toSquare]: {
+        backgroundColor: 'rgba(52, 211, 153, 0.35)', // Vibrant emerald tint for target square
+      },
+    };
+  }
+
   function pgnReplayToPosition(history: ChessStep[], targetIndex: number) {
-    // Intercept navigation triggers to drop the forced overview card text overlay focus state
     setForcingOverviewView(false);
 
     const newGame = new Chess();
@@ -139,7 +158,6 @@ export default function App() {
     pgnReplayToPosition(moveHistory, moveHistory.length - 1);
   }
 
-  // Reset function to clear the current match state and bring back the input panel
   function handleResetAnalysis() {
     setGame(new Chess());
     setPgnInput('');
@@ -223,6 +241,7 @@ export default function App() {
 
   const activeFeedbackContent = getActiveFeedbackBlock();
   const hasAnalysisData = moveHistory.length > 0;
+  const currentHighlightStyles = getCustomSquareStyles();
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 text-zinc-100 font-sans">
@@ -243,6 +262,7 @@ export default function App() {
               position={game.fen()}
               onPieceDrop={onDrop}
               arePiecesDraggable={!hasAnalysisData}
+              customSquareStyles={currentHighlightStyles} // Injected dynamic highlight map object
             />
           </div>
 
@@ -279,9 +299,7 @@ export default function App() {
             )}
           </div>
 
-          {/* DYNAMIC VIEW CONTEXT SWITCHER TRIGGER BLOCK */}
           {!hasAnalysisData ? (
-            // State A: Show input area before analysis runs
             <div className="flex flex-col gap-4 flex-1">
               <textarea
                 className="w-full h-80 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500 resize-none font-mono"
@@ -304,9 +322,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-            // State B: Hide input and expand comment section to full height
             <div className="flex flex-col flex-1 gap-3 h-full">
-              {/* Utility shortcuts row for rapid overview toggling */}
               <div className="flex gap-2">
                 <button
                   onClick={() => setForcingOverviewView(true)}
@@ -320,7 +336,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Extended Verdict Display Box Container */}
               {activeFeedbackContent && (
                 <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-4 h-[410px] overflow-y-auto shadow-inner">
                   <strong className="text-emerald-400 block mb-2 text-sm uppercase tracking-wider font-mono">
