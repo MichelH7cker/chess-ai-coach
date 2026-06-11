@@ -13,6 +13,9 @@ export default function App() {
   const [pgnInput, setPgnInput] = useState('');
   const [loading, setLoading] = useState(false);
   
+  // State variable tracking user side perspective selection
+  const [userColor, setUserColor] = useState<string>('white'); // "white" or "black"
+  
   const [rawCoachFeedback, setRawCoachFeedback] = useState('');
   const [moveHistory, setMoveHistory] = useState<ChessStep[]>([]);
   const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(-1); 
@@ -88,8 +91,6 @@ export default function App() {
     return '';
   }
 
-  // DYNAMIC SQUARE STYLING CALCULATOR
-  // Computes overlay highlight markers using raw UCI positional coordinates
   function getCustomSquareStyles() {
     if (currentMoveIndex === -1 || moveHistory.length === 0) return {};
 
@@ -100,13 +101,12 @@ export default function App() {
     const fromSquare = uci.slice(0, 2);
     const toSquare = uci.slice(2, 4);
 
-    // Returns soft, semi-transparent highlight overlays mirroring premium chess clients
     return {
       [fromSquare]: {
-        backgroundColor: 'rgba(251, 191, 36, 0.25)', // Smooth ambient amber for origin square
+        backgroundColor: 'rgba(251, 191, 36, 0.25)', 
       },
       [toSquare]: {
-        backgroundColor: 'rgba(52, 211, 153, 0.35)', // Vibrant emerald tint for target square
+        backgroundColor: 'rgba(52, 211, 153, 0.35)', 
       },
     };
   }
@@ -200,7 +200,7 @@ export default function App() {
     setCurrentMoveIndex(-1);
     setForcingOverviewView(false);
 
-    console.log('🚀 Analysis started. Sending PGN to server...');
+    console.log('🚀 Analysis started. Sending PGN and color perspective to server...');
 
     try {
       const response = await fetch('http://localhost:8000/analyze', {
@@ -208,7 +208,10 @@ export default function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ pgn_text: pgnInput }),
+        body: JSON.stringify({ 
+          pgn_text: pgnInput,
+          user_color: userColor
+        }),
       });
 
       const result = await response.json();
@@ -262,7 +265,7 @@ export default function App() {
               position={game.fen()}
               onPieceDrop={onDrop}
               arePiecesDraggable={!hasAnalysisData}
-              customSquareStyles={currentHighlightStyles} // Injected dynamic highlight map object
+              customSquareStyles={currentHighlightStyles}
             />
           </div>
 
@@ -300,9 +303,42 @@ export default function App() {
           </div>
 
           {!hasAnalysisData ? (
+            // State A: Show input controls before analysis execution loop
             <div className="flex flex-col gap-4 flex-1">
+              
+              {/* CLEAN PERSPECTIVE COLOR SELECTOR BUTTON GROUP */}
+              <div className="flex flex-col gap-2 bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                <label className="text-xs font-mono uppercase tracking-wider text-zinc-400">I played this match as:</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUserColor('white')}
+                    disabled={loading}
+                    className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
+                      userColor === 'white'
+                        ? 'bg-zinc-100 text-zinc-950 border border-white shadow-md font-extrabold'
+                        : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
+                    }`}
+                  >
+                    White
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserColor('black')}
+                    disabled={loading}
+                    className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
+                      userColor === 'black'
+                        ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-md font-extrabold'
+                        : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
+                    }`}
+                  >
+                    Black
+                  </button>
+                </div>
+              </div>
+
               <textarea
-                className="w-full h-80 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500 resize-none font-mono"
+                className="w-full h-64 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500 resize-none font-mono"
                 placeholder="Paste your game PGN metadata block here..."
                 value={pgnInput}
                 onChange={(e) => setPgnInput(e.target.value)}
@@ -322,6 +358,7 @@ export default function App() {
               </button>
             </div>
           ) : (
+            // State B: Expanded Dynamic Commentary Panel Display
             <div className="flex flex-col flex-1 gap-3 h-full">
               <div className="flex gap-2">
                 <button
