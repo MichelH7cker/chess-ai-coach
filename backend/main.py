@@ -1,11 +1,23 @@
 import io
+import os
 import chess.pgn
 import chess.engine
+from google import genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Load environment variables from the .env file
+load_dotenv()
+
+try:
+    client = genai.Client()
+except Exception as e:
+    print(f"Error initializing Gemini Client: {e}")
 
 app = FastAPI(title="Chess AI Coach API")
 
+# Path to the Stockfish binary on Linux
 STOCKFISH_PATH = "/usr/bin/stockfish"
 
 class GameInput(BaseModel):
@@ -29,38 +41,33 @@ async def analyze_game(game_input: GameInput):
         
         analysis_results = []
         
-        # Evaluate the starting position before any moves are made
         initial_info = engine.analyse(board, chess.engine.Limit(depth=10))
         previous_score = initial_info["score"].white().score(mate_score=10000) / 100.0
 
         for move in game.mainline_moves():
-            is_white_turn = board.turn  # True if White is about to move
-            
-            # Extract player color and turn number BEFORE pushing the move
+            is_white_turn = board.turn
             player_color = "white" if is_white_turn else "black"
             turn_number = board.fullmove_number
             
-            # 1. Ask engine for the best move BEFORE the human plays
+            human_readable_move = board.san(move)
+            
             info_before = engine.analyse(board, chess.engine.Limit(depth=10))
             best_move = info_before.get("pv", [None])[0]
             best_move_uci = best_move.uci() if best_move else None
-
-            # 2. Make the human move
+            best_move_san = board.san(best_move) if best_move else None
+            
             board.push(move)
             
-            # 3. Analyze the new position AFTER the human move
             info_after = engine.analyse(board, chess.engine.Limit(depth=10))
             pov_score = info_after["score"].white()
             
             current_eval_number = pov_score.score(mate_score=10000) / 100.0
             
-            # 4. Calculate Delta from the perspective of the player who just moved
             if is_white_turn:
                 delta = current_eval_number - previous_score
             else:
                 delta = previous_score - current_eval_number
                 
-            # 5. Semantic Classification based on Delta
             classification = "normal"
             if delta <= -2.0:
                 classification = "blunder"
@@ -69,28 +76,71 @@ async def analyze_game(game_input: GameInput):
             elif delta <= -0.5:
                 classification = "inaccuracy"
 
-            # Prepare clean JSON output
             score_val = pov_score.score() / 100.0 if not pov_score.is_mate() else None
             mate_val = pov_score.mate() if pov_score.is_mate() else None
 
             analysis_results.append({
                 "turn_number": turn_number,
                 "player": player_color,
-                "move_played": move.uci(),
-                "best_move_engine": best_move_uci,
+                "move_played_uci": move.uci(),
+                "move_played_san": human_readable_move,
+                "best_move_engine_uci": best_move_uci,
+                "best_move_engine_san": best_move_san,
                 "score_after": score_val,
                 "mate": mate_val,
                 "delta": round(delta, 2),
                 "classification": classification
             })
 
-            # The current score becomes the previous score for the next iteration
             previous_score = current_eval_number
 
+        # 1. First attempt to quit the engine safely after normal analysis
         engine.quit()
-        return {"status": "success", "data": analysis_results}
+
+        critical_mistakes = [
+            res for res in analysis_results 
+            if res["classification"] in ["blunder", "mistake"]
+        ]
+
+        coach_feedback = "Excellent game! No major mistakes or blunders detected."
+
+        if critical_mistakes:
+            prompt = f"""
+            Act as an expert chess coach. 
+            I have a list of critical mistakes made in a recent game.
+            
+            For EACH mistake in the list below, you MUST explain:
+            1. Why the move played by the human was bad (what did it expose, lose, or miss?).
+            2. What the engine suggested instead.
+            3. Why the engine's suggested move is mathematically or positionally superior.
+            
+            Keep the tone encouraging, objective, and highly pedagogical.
+            Do not format as a letter, just provide the direct analysis grouped by turn number.
+            Output the response entirely in English.
+            
+            Mistakes data (JSON format):
+            {critical_mistakes}
+            """
+            
+            # 2. FIX: Updated the model to the latest standard
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            coach_feedback = response.text
+
+        return {
+            "status": "success", 
+            "coach_feedback": coach_feedback,
+            "data": analysis_results
+        }
 
     except Exception as e:
+        print(f"Backend Error: {e}")
+        # 3. FIX: Idempotent engine shutdown to prevent Cascading Failures
         if 'engine' in locals():
-            engine.quit()
+            try:
+                engine.quit()
+            except Exception:
+                pass # Silently ignore if already closed
         raise HTTPException(status_code=500, detail=str(e))
