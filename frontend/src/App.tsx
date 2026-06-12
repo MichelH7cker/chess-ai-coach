@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
+import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceDot, ResponsiveContainer } from 'recharts';
 
 interface ChessStep {
   move_played_san: string;
@@ -82,7 +83,7 @@ export default function App() {
     
     if (currentMoveIndex === -1 || forcingOverviewView) {
       const overviewText = extractTagContent(rawCoachFeedback, 'OVERVIEW');
-      return overviewText || "### Match Loaded\nUse the navigation controls below the chessboard to step through individual move reviews.";
+      return overviewText || "### Match Loaded\nUse the navigation controls or click the graph below to step through individual move reviews.";
     }
     
     const currentStep = moveHistory[currentMoveIndex];
@@ -243,8 +244,6 @@ export default function App() {
     setCurrentMoveIndex(-1);
     setForcingOverviewView(false);
 
-    console.log('🚀 Analysis started. Sending PGN and color perspective to server...');
-
     try {
       const response = await fetch('http://localhost:8000/analyze', {
         method: 'POST',
@@ -258,27 +257,23 @@ export default function App() {
       });
 
       const result = await response.json();
-      console.log('📥 Server response received:', result);
 
       if (response.ok && result.status === 'success') {
         setRawCoachFeedback(String(result.coach_feedback_raw));
-        
         const backendMoves = result.data || [];
         setMoveHistory(backendMoves);
-
         setGame(new Chess());
         setCurrentMoveIndex(-1);
-        console.log('✅ Match loaded successfully into state engine.'); // Solved native print statement collision bug
       } else {
         const errorDetail = result.detail || result.message || 'Processing engine fault.';
         setRawCoachFeedback(
-          `[OVERVIEW]\n### 📴 Analysis Failure\n\nThe server processed the structural move chain, but could not compile dynamic coach notes.\n\n**Details:** ${typeof errorDetail === 'object' ? JSON.stringify(errorDetail) : errorDetail}\n[/OVERVIEW]`
+          `[OVERVIEW]\n### 📴 Analysis Failure\n\n**Details:** ${typeof errorDetail === 'object' ? JSON.stringify(errorDetail) : errorDetail}\n[/OVERVIEW]`
         );
       }
     } catch (error) {
       console.error('💥 Critical Network Error:', error);
       setRawCoachFeedback(
-        '[OVERVIEW]\n### ❌ Connection Fault\n\nCould not communicate with the backend application environment.\n[/OVERVIEW]'
+        '[OVERVIEW]\n### ❌ Connection Fault\n\nCould not communicate with the backend.\n[/OVERVIEW]'
       );
     } finally {
       setLoading(false);
@@ -294,52 +289,66 @@ export default function App() {
   const activeStepObj = currentMoveIndex >= 0 ? moveHistory[currentMoveIndex] : null;
   const isWhiteWinning = activeStepObj ? (activeStepObj.eval_cp >= 0 || (activeStepObj.mate_turns !== null && activeStepObj.mate_turns > 0)) : true;
 
+  // COMPRESSED ADVANTAGE TIMELINE DATA SCHEDULING (EXPANDS METRICS NEAR 0)
+  const chartData = [
+    { move: 0, eval: 0, realEvalStr: '0.0', san: 'Start' }, 
+    ...moveHistory.map((step, index) => {
+      const pawns = (step.eval_cp ?? 0) / 100;
+      let visualScore = 0;
+      let realScoreString = '';
+      
+      if (step.is_mate) {
+        visualScore = step.mate_turns && step.mate_turns > 0 ? 4.5 : -4.5;
+        realScoreString = step.mate_turns ? `M${Math.abs(step.mate_turns)}` : 'M';
+      } else {
+        visualScore = Math.sign(pawns) * Math.sqrt(Math.abs(pawns)) * 2.2;
+        if (visualScore > 4.5) visualScore = 4.5;
+        if (visualScore < -4.5) visualScore = -4.5;
+        realScoreString = pawns >= 0 ? `+${pawns.toFixed(2)}` : `${pawns.toFixed(2)}`;
+      }
+
+      return {
+        move: index + 1,
+        eval: visualScore, 
+        realEvalStr: realScoreString, 
+        san: step.move_played_san
+      };
+    })
+  ];
+
+  const currentChartXValue = currentMoveIndex + 1;
+  const currentChartYValue = chartData[currentChartXValue] ? chartData[currentChartXValue].eval : 0;
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-zinc-950 text-zinc-100 font-sans">
       <header className="mb-6 text-center">
-        <h1 className="text-3xl font-bold text-emerald-400 mb-1">
-          Chess AI Coach
-        </h1>
-        <p className="text-sm text-gray-400">
-          High-accuracy Stockfish evaluations paired with contextual, professional coaching reviews
-        </p>
+        <h1 className="text-3xl font-bold text-emerald-400 mb-1">Chess AI Coach</h1>
+        <p className="text-sm text-gray-400">High-accuracy Stockfish evaluations paired with contextual reviews</p>
       </header>
 
       <main className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
-        {/* Board Container Column Layout wrapper */}
         <div className="md:col-span-2 flex flex-col items-center bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl gap-4">
           <div className="w-full max-w-[520px] flex flex-col gap-3">
             
             <div className="grid grid-cols-[24px_1fr] gap-3 w-full relative items-stretch">
-              
-              {/* LIVE DYNAMIC EVALUATION GRAPHIC BAR */}
+              {/* EVAL BAR */}
               <div className="w-6 bg-zinc-950 border border-zinc-800 rounded flex flex-col overflow-hidden relative font-mono text-[9px] font-extrabold select-none shadow-inner h-full z-10">
                 {boardOrientation === 'white' ? (
                   <>
                     <div className="bg-zinc-900 flex-1 transition-all duration-300" />
-                    <div 
-                      className="bg-zinc-100 transition-all duration-300" 
-                      style={{ height: `${whiteBarPercentage}%` }}
-                    />
-                    <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'bottom-2 text-zinc-950' : 'top-2 text-zinc-100'}`}>
-                      {evalTextLabel}
-                    </div>
+                    <div className="bg-zinc-100 transition-all duration-300" style={{ height: `${whiteBarPercentage}%` }} />
+                    <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'bottom-2 text-zinc-950' : 'top-2 text-zinc-100'}`}>{evalTextLabel}</div>
                   </>
                 ) : (
                   <>
-                    <div 
-                      className="bg-zinc-100 transition-all duration-300" 
-                      style={{ height: `${whiteBarPercentage}%` }}
-                    />
+                    <div className="bg-zinc-100 transition-all duration-300" style={{ height: `${whiteBarPercentage}%` }} />
                     <div className="bg-zinc-900 flex-1 transition-all duration-300" />
-                    <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'top-2 text-zinc-950' : 'bottom-2 text-zinc-100'}`}>
-                      {evalTextLabel}
-                    </div>
+                    <div className={`absolute left-0 right-0 text-center ${isWhiteWinning ? 'top-2 text-zinc-950' : 'bottom-2 text-zinc-100'}`}>{evalTextLabel}</div>
                   </>
                 )}
               </div>
 
-              {/* Chessboard Box Frame Wrapper Layout */}
+              {/* CHESSBOARD */}
               <div className="w-full aspect-square">
                 <Chessboard
                   position={game.fen()}
@@ -352,26 +361,80 @@ export default function App() {
             </div>
             
             <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={handleToggleOrientation}
-                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
-              >
+              <button type="button" onClick={handleToggleOrientation} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm">
                 🔄 Flip Board
               </button>
             </div>
           </div>
 
-          {/* Interactive Navigation Control Bar */}
+          {/* CONTROLS & TIMELINE CHART PANEL */}
           {hasAnalysisData && (
-            <div className="flex flex-col items-center gap-2 w-full max-w-[480px] bg-zinc-950 p-3 rounded-lg border border-zinc-800 shadow-inner">
+            <div className="flex flex-col items-center gap-4 w-full max-w-[520px] bg-zinc-950 p-4 rounded-lg border border-zinc-800 shadow-inner">
               <div className="flex justify-between items-center w-full gap-2">
                 <button onClick={handleJumpToStart} disabled={currentMoveIndex === -1} className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold py-2 rounded transition-colors cursor-pointer">« Start</button>
                 <button onClick={handlePreviousMove} disabled={currentMoveIndex === -1} className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold py-2 rounded transition-colors cursor-pointer">‹ Back</button>
                 <button onClick={handleNextMove} disabled={currentMoveIndex === moveHistory.length - 1} className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold py-2 rounded transition-colors cursor-pointer">Next ›</button>
                 <button onClick={handleJumpToEnd} disabled={currentMoveIndex === moveHistory.length - 1} className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold py-2 rounded transition-colors cursor-pointer">End »</button>
               </div>
-              <div className="text-xs text-zinc-400 mt-1 font-mono">
+              
+              {/* SHARP LINEAR TIMELINE MATCH CHART */}
+              <div className="w-full h-24 bg-zinc-900/50 border border-zinc-800/80 rounded p-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart 
+                    data={chartData} 
+                    onClick={(data) => {
+                      if (data && data.activeTooltipIndex !== undefined) {
+                        pgnReplayToPosition(moveHistory, data.activeTooltipIndex - 1);
+                      }
+                    }}
+                    margin={{ top: 5, right: 5, left: -25, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="colorEval" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                    <XAxis dataKey="move" hide />
+                    <YAxis domain={[-5, 5]} hide />
+                    <Tooltip 
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const item = payload[0].payload;
+                          return (
+                            <div className="bg-zinc-900 border border-zinc-700 p-2 rounded shadow-xl text-[10px] font-mono">
+                              <p className="text-emerald-400 font-bold">
+                                {item.move === 0 ? "Starting Position" : `Move ${item.move}: ${item.san}`}
+                              </p>
+                              <p className="text-zinc-300">Eval: {item.realEvalStr}</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <ReferenceLine y={0} stroke="#52525b" strokeWidth={1} />
+                    
+                    {/* FIXED CONTINUOUS PLAYBACK BOUNDARY MARKS */}
+                    <ReferenceLine x={currentChartXValue} stroke="#f4f4f5" strokeDasharray="3 3" strokeWidth={1.5} />
+                    <ReferenceDot 
+                      x={currentChartXValue} 
+                      y={currentChartYValue} 
+                      r={5} 
+                      fill="#10b981" 
+                      stroke="#ffffff" 
+                      strokeWidth={2} 
+                      isAnimationActive={false} 
+                    />
+
+                    {/* STABLE LINEAR GEOMETRIC MOVEMENT PATHS */}
+                    <Area type="linear" dataKey="eval" stroke="#10b981" fillOpacity={1} fill="url(#colorEval)" isAnimationActive={false} className="cursor-pointer" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="text-xs text-zinc-400 font-mono">
                 Position: <span className="text-emerald-400 font-bold">{currentMoveIndex + 1}</span> / {moveHistory.length} 
                 {currentMoveIndex >= 0 && ` (${moveHistory[currentMoveIndex].move_played_san})`}
               </div>
@@ -379,34 +442,23 @@ export default function App() {
           )}
         </div>
 
-        {/* Evaluation Control Panel Sidebar Area */}
-        <div className="flex flex-col bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl min-h-[570px] w-full transition-all relative overflow-hidden">
+        {/* SIDEBAR PANEL */}
+        <div className="flex flex-col bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl min-h-[570px] w-full relative overflow-hidden">
           <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
-            <h2 className="text-xl font-semibold text-zinc-200">
-              {hasAnalysisData ? "Coach Dashboard" : "Game Analysis"}
-            </h2>
+            <h2 className="text-xl font-semibold text-zinc-200">{hasAnalysisData ? "Coach Dashboard" : "Game Analysis"}</h2>
             {hasAnalysisData && (
-              <button 
-                onClick={handleResetAnalysis}
-                className="text-xs bg-zinc-800 text-zinc-400 hover:bg-red-950 hover:text-red-400 border border-zinc-700 px-2 py-1 rounded transition-all font-semibold cursor-pointer"
-              >
+              <button onClick={handleResetAnalysis} className="text-xs bg-zinc-800 text-zinc-400 hover:bg-red-950 hover:text-red-400 border border-zinc-700 px-2 py-1 rounded transition-all font-semibold cursor-pointer">
                 Reset App
               </button>
             )}
           </div>
 
-          {/* DEEP COGNITIVE SPINNER INTERACTION LAYER */}
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-4">
-              {/* Premium Geometric CSS Loading Spinner */}
               <div className="w-12 h-12 border-4 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
               <div className="flex flex-col gap-1">
-                <strong className="text-sm font-semibold text-zinc-200">
-                  Stockfish Calculating Deeply...
-                </strong>
-                <p className="text-xs text-zinc-400 max-w-[220px] leading-relaxed font-mono">
-                  Evaluating board states up to depth 20 parameters. Please stand by.
-                </p>
+                <strong className="text-sm font-semibold text-zinc-200">Stockfish Calculating Deeply...</strong>
+                <p className="text-xs text-zinc-400 max-w-[220px] leading-relaxed font-mono">Evaluating board states up to depth 20 parameters. Please stand by.</p>
               </div>
             </div>
           ) : !hasAnalysisData ? (
@@ -414,74 +466,24 @@ export default function App() {
               <div className="flex flex-col gap-2 bg-zinc-950 p-3 rounded-lg border border-zinc-800">
                 <label className="text-xs font-mono uppercase tracking-wider text-zinc-400">I played this match as:</label>
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserColor('white');
-                      setBoardOrientation('white'); 
-                    }}
-                    className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
-                      userColor === 'white'
-                        ? 'bg-zinc-100 text-zinc-950 border border-white shadow-md font-extrabold'
-                        : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
-                    }`}
-                  >
-                    White
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserColor('black');
-                      setBoardOrientation('black'); 
-                    }}
-                    className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${
-                      userColor === 'black'
-                        ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-md font-extrabold'
-                        : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
-                    }`}
-                  >
-                    Black
-                  </button>
+                  <button type="button" onClick={() => { setUserColor('white'); setBoardOrientation('white'); }} className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${userColor === 'white' ? 'bg-zinc-100 text-zinc-950 border border-white font-extrabold' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>White</button>
+                  <button type="button" onClick={() => { setUserColor('black'); setBoardOrientation('black'); }} className={`flex-1 py-2 rounded font-bold text-xs transition-all cursor-pointer ${userColor === 'black' ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 font-extrabold' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'}`}>Black</button>
                 </div>
               </div>
 
-              <textarea
-                className="w-full h-64 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500 resize-none font-mono"
-                placeholder="Paste your game PGN metadata block here..."
-                value={pgnInput}
-                onChange={(e) => setPgnInput(e.target.value)}
-              />
-
-              <button
-                onClick={handleAnalyze}
-                className="w-full font-bold py-3 px-4 rounded-lg transition-colors shadow-md cursor-pointer bg-emerald-500 hover:bg-emerald-600 text-zinc-950"
-              >
-                Analyze Match
-              </button>
+              <textarea className="w-full h-64 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500 resize-none font-mono" placeholder="Paste your game PGN metadata block here..." value={pgnInput} onChange={(e) => setPgnInput(e.target.value)} />
+              <button onClick={handleAnalyze} className="w-full font-bold py-3 px-4 rounded-lg transition-colors shadow-md cursor-pointer bg-emerald-500 hover:bg-emerald-600 text-zinc-950">Analyze Match</button>
             </div>
           ) : (
             <div className="flex flex-col flex-1 gap-3 h-full">
               <div className="flex gap-2">
-                <button
-                  onClick={() => setForcingOverviewView(true)}
-                  className={`flex-1 text-xs py-1.5 px-3 rounded font-medium border transition-all cursor-pointer ${
-                    forcingOverviewView || currentMoveIndex === -1
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-bold'
-                      : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  📋 View Match Overview
-                </button>
+                <button onClick={() => setForcingOverviewView(true)} className={`flex-1 text-xs py-1.5 px-3 rounded font-medium border transition-all cursor-pointer ${forcingOverviewView || currentMoveIndex === -1 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-bold' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>📋 View Match Overview</button>
               </div>
 
               {activeFeedbackContent && (
                 <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-4 h-[410px] overflow-y-auto shadow-inner">
-                  <strong className="text-emerald-400 block mb-2 text-sm uppercase tracking-wider font-mono">
-                    {forcingOverviewView || currentMoveIndex === -1 ? "Overview Verdict:" : "Live Move Verdict:"}
-                  </strong>
-                  <div className="text-sm text-zinc-300">
-                    {renderMarkdownBlocks(activeFeedbackContent)}
-                  </div>
+                  <strong className="text-emerald-400 block mb-2 text-sm uppercase tracking-wider font-mono">{forcingOverviewView || currentMoveIndex === -1 ? "Overview Verdict:" : "Live Move Verdict:"}</strong>
+                  <div className="text-sm text-zinc-300">{renderMarkdownBlocks(activeFeedbackContent)}</div>
                 </div>
               )}
             </div>

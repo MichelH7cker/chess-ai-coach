@@ -71,7 +71,7 @@ async def analyze_game(request: PGNRequest):
             
             board.push(move)
             
-            # Stockfish real-time analysis engine iteration loop
+            # Stockfish calculation depth locked at 20 parameter criteria levels
             analysis_info = engine.analyse(board, chess.engine.Limit(depth=20))
             for_white_score = analysis_info["score"].white()
             
@@ -107,7 +107,6 @@ async def analyze_game(request: PGNRequest):
             )
             move_telemetry_logs.append(telemetry_line)
 
-            # Pack raw evaluation numbers safely for frontend UI rendering
             eval_cp_value = current_eval_score if not for_white_score.is_mate() else 0
             mate_turns_value = for_white_score.mate() if for_white_score.is_mate() else None
 
@@ -133,6 +132,11 @@ async def analyze_game(request: PGNRequest):
 
         telemetry_payload_string = "\n".join(move_telemetry_logs)
         
+        # DYNAMIC COMPLIANCE CHECKLIST GENERATION
+        # Builds an unbendable text contract list for the LLM architecture
+        mandatory_tags_list = ["[OVERVIEW]"] + [f"[MOVE_{i}]" for i in range(1, len(chess_steps) + 1)]
+        checklist_string = ", ".join(mandatory_tags_list)
+
         prompt = (
             f"You are a professional chess grandmaster and an encouraging, highly educational chess coach analyzing a user's match.\n\n"
             f"USER PERSPECTIVE CONTEXT:\n"
@@ -143,19 +147,22 @@ async def analyze_game(request: PGNRequest):
             f"* Game Ended in Checkmate: {game_ended_in_mate}\n"
             f"* Absolute Match Winner: {absolute_winner}\n"
             f"* Absolute Match Loser: {absolute_loser}\n\n"
-            f"STRICT OUTPUT ARCHITECTURE INSTRUCTIONS:\n"
-            f"Your output must contain ONLY the explicit tagged blocks requested below. Do NOT include any introduction, conversational filler, greeting, or friendly preamble outside of these tags. Start directly with the [OVERVIEW] tag.\n\n"
+            f"STRICT ARCHITECTURE COMPLIANCE CHECKLIST:\n"
+            f"Your response MUST contain exactly the following structural tag blocks, in order, without any modifications, additions, or omissions. "
+            f"Do NOT output any greetings, introductions, preambles, or conversational transitions outside of these tags. Start directly with the [OVERVIEW] block.\n\n"
+            f"REQUIRED TAGS CHECKLIST: {checklist_string}\n\n"
+            f"CRITICAL FINAL MOVE RULE:\n"
+            f"You are explicitly forbidden from skipping or omitting the final move block ([MOVE_{len(chess_steps)}]). Even though the game ends in a checkmate at this exact index point, you MUST generate the full [MOVE_{len(chess_steps)}] block to explain how the mating net was closed or why the defense failed.\n\n"
+            f"BLOCK FORMAT SPECIFICATIONS:\n"
             f"[OVERVIEW]\n"
             f"### Match Overview\n"
-            f"Provide a clear, respectful, and educational executive summary of the match. Address the user directly based on the 'USER PERSPECTIVE CONTEXT' as the {request.user_color.upper()} player. "
-            f"Explain the critical turning points of the game, highlighting strategic themes and core areas for technical improvement.\n"
+            f"Provide a clear, respectful, and educational executive summary of the match. Address the user directly based on the 'USER PERSPECTIVE CONTEXT' as the {request.user_color.upper()} player.\n"
             f"[/OVERVIEW]\n\n"
-            f"For every single move block present in the telemetry above (from MOVE_1 up to MOVE_{len(chess_steps)}), you MUST generate a corresponding review block using its exact tag.\n"
-            f"Example format:\n"
+            f"Followed by each individual move block from the checklist. Example format:\n"
             f"[MOVE_1]\n"
             f"### Move 1 Analysis\n"
-            f"* **Evaluation Details:** Analysis of the score adjustment...\n"
-            f"* **Grandmaster Advice:** Educational advice tailored precisely to the user's chosen perspective...\n"
+            f"* **Evaluation Details:** Analysis of the position matrix...\n"
+            f"* **Grandmaster Advice:** Educational feedback tailored to the user's perspective...\n"
             f"[/MOVE_1]\n\n"
             f"STRICT FORMATTING RULE: Only use standard markdown `###` for headers and `*` for bullet points. Do NOT use `+` or `-` characters as list bullet designators."
         )
@@ -164,10 +171,10 @@ async def analyze_game(request: PGNRequest):
             response = groq_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[
-                    {"role": "system", "content": "You are an automated chess coaching engine. You must ONLY output the strictly requested tagged blocks ([OVERVIEW], [MOVE_1], etc.). Do NOT write any introductory or concluding text outside these tags. Inside the tags, maintain a respectful, grandmaster-level educational tone."},
+                    {"role": "system", "content": f"You are an automated chess coaching script. You must strictly output the following structural blocks in sequence and nothing else: {checklist_string}. You must never skip the final move block under any circumstances."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, 
+                temperature=0.1, 
                 stream=False
             )
             
