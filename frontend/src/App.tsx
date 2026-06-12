@@ -12,6 +12,15 @@ interface ChessStep {
   mate_turns: number | null;
 }
 
+// Interface estendida para suportar os novos campos estruturados do backend
+interface AnalysisResponse {
+  status: string;
+  opening_name: string;
+  literature_source: string;
+  coach_feedback_raw: string;
+  data: ChessStep[];
+}
+
 export default function App() {
   const [game, setGame] = useState(() => new Chess());
   const [pgnInput, setPgnInput] = useState('');
@@ -24,6 +33,10 @@ export default function App() {
   const [moveHistory, setMoveHistory] = useState<ChessStep[]>([]);
   const [currentMoveIndex, setCurrentMoveIndex] = useState<number>(-1); 
   const [forcingOverviewView, setForcingOverviewView] = useState<boolean>(false);
+
+  // Estados adicionados de forma limpa para capturar a abertura e o livro do backend
+  const [openingName, setOpeningName] = useState<string>('');
+  const [literatureSource, setLiteratureSource] = useState<string>('');
 
   function parseBoldText(text: string) {
     const boldRegex = /\*\*(.*?)\*\*/g;
@@ -209,6 +222,8 @@ export default function App() {
     setBoardOrientation('white');
     setUserColor('white');
     setForcingOverviewView(false);
+    setOpeningName('');
+    setLiteratureSource('');
   }
 
   function onDrop(sourceSquare: string, targetSquare: string) {
@@ -243,6 +258,8 @@ export default function App() {
     setMoveHistory([]);
     setCurrentMoveIndex(-1);
     setForcingOverviewView(false);
+    setOpeningName('');
+    setLiteratureSource('');
 
     try {
       const response = await fetch('http://localhost:8000/analyze', {
@@ -256,18 +273,21 @@ export default function App() {
         }),
       });
 
-      const result = await response.json();
+      const result: AnalysisResponse = await response.json();
 
       if (response.ok && result.status === 'success') {
         setRawCoachFeedback(String(result.coach_feedback_raw));
+        setOpeningName(result.opening_name || '');
+        setLiteratureSource(result.literature_source || '');
+        
         const backendMoves = result.data || [];
         setMoveHistory(backendMoves);
         setGame(new Chess());
         setCurrentMoveIndex(-1);
       } else {
-        const errorDetail = result.detail || result.message || 'Processing engine fault.';
+        const errorDetail = result.coach_feedback_raw || 'Processing engine fault.';
         setRawCoachFeedback(
-          `[OVERVIEW]\n### 📴 Analysis Failure\n\n**Details:** ${typeof errorDetail === 'object' ? JSON.stringify(errorDetail) : errorDetail}\n[/OVERVIEW]`
+          `[OVERVIEW]\n### 📴 Analysis Failure\n\n**Details:** ${errorDetail}\n[/OVERVIEW]`
         );
       }
     } catch (error) {
@@ -289,7 +309,6 @@ export default function App() {
   const activeStepObj = currentMoveIndex >= 0 ? moveHistory[currentMoveIndex] : null;
   const isWhiteWinning = activeStepObj ? (activeStepObj.eval_cp >= 0 || (activeStepObj.mate_turns !== null && activeStepObj.mate_turns > 0)) : true;
 
-  // COMPRESSED ADVANTAGE TIMELINE DATA SCHEDULING (EXPANDS METRICS NEAR 0)
   const chartData = [
     { move: 0, eval: 0, realEvalStr: '0.0', san: 'Start' }, 
     ...moveHistory.map((step, index) => {
@@ -329,6 +348,19 @@ export default function App() {
       <main className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
         <div className="md:col-span-2 flex flex-col items-center bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl gap-4">
           <div className="w-full max-w-[520px] flex flex-col gap-3">
+            
+            {/* INCLUSÃO DO TÍTULO DA ABERTURA E BADGE DE LIVRO NO TOPO DO TABULEIRO */}
+            {hasAnalysisData && openingName && (
+              <div className="text-center mb-1 bg-zinc-950/40 p-3 rounded-lg border border-zinc-800/60 shadow-inner">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 block mb-0.5">Opening Position</span>
+                <h2 className="text-lg font-bold text-zinc-100 tracking-tight leading-tight">{openingName}</h2>
+                {literatureSource && literatureSource !== "General Chess Principles Handbook" && (
+                  <span className="inline-block mt-1.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-400 px-2 py-0.5 rounded-full">
+                    📖 Library: <strong className="text-emerald-400 font-normal">{literatureSource}</strong>
+                  </span>
+                )}
+              </div>
+            )}
             
             <div className="grid grid-cols-[24px_1fr] gap-3 w-full relative items-stretch">
               {/* EVAL BAR */}
@@ -377,7 +409,7 @@ export default function App() {
                 <button onClick={handleJumpToEnd} disabled={currentMoveIndex === moveHistory.length - 1} className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold py-2 rounded transition-colors cursor-pointer">End »</button>
               </div>
               
-              {/* SHARP LINEAR TIMELINE MATCH CHART */}
+              {/* AREA CHART */}
               <div className="w-full h-24 bg-zinc-900/50 border border-zinc-800/80 rounded p-1">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart 
@@ -415,8 +447,6 @@ export default function App() {
                       }}
                     />
                     <ReferenceLine y={0} stroke="#52525b" strokeWidth={1} />
-                    
-                    {/* FIXED CONTINUOUS PLAYBACK BOUNDARY MARKS */}
                     <ReferenceLine x={currentChartXValue} stroke="#f4f4f5" strokeDasharray="3 3" strokeWidth={1.5} />
                     <ReferenceDot 
                       x={currentChartXValue} 
@@ -427,8 +457,6 @@ export default function App() {
                       strokeWidth={2} 
                       isAnimationActive={false} 
                     />
-
-                    {/* STABLE LINEAR GEOMETRIC MOVEMENT PATHS */}
                     <Area type="linear" dataKey="eval" stroke="#10b981" fillOpacity={1} fill="url(#colorEval)" isAnimationActive={false} className="cursor-pointer" />
                   </AreaChart>
                 </ResponsiveContainer>
